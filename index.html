@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Symulator Elektra GES-110</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      background-color: #121212;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    /* Kontener pilota z optymalną obsługą pełnego ekranu */
+    .pilot-container {
+      position: relative;
+      width: 320px;
+      height: 640px;
+      max-width: 100vw;
+      max-height: 100vh;
+      background-image: url('https://lampyostrzegawcze.pl/userdata/public/gfx/bfe1b484600d60c03814a4f805de996e.jpg');
+      background-size: contain;
+      background-repeat: no-repeat;
+      background-position: center;
+      user-select: none;
+      transition: all 0.3s ease;
+    }
+
+    /* Stylizacja dla natywnego trybu pełnoekranowego */
+    .pilot-container:fullscreen,
+    .pilot-container:-webkit-full-screen {
+      width: 100vw !important;
+      height: 100vh !important;
+      max-width: none !important;
+      max-height: none !important;
+      background-color: #121212;
+    }
+
+    /* Zmniejszone przyciski (24px) */
+    .btn {
+      position: absolute;
+      cursor: pointer;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      background: rgba(255, 255, 255, 0);
+      outline: none;
+      transition: background 0.1s, box-shadow 0.1s;
+      transform: translate(-50%, -50%);
+      width: 24px;
+      height: 24px;
+      z-index: 10;
+    }
+
+    .btn:active, .btn.active {
+      background: rgba(255, 255, 255, 0.35);
+      box-shadow: 0 0 8px rgba(255, 255, 255, 0.8);
+    }
+
+    /* UKŁAD PRZYCISKÓW (top: 48.6%):
+       Przycisk 1 (Włączanie/MIX) -> LEWA STRONA (43.9%)
+       Przycisk 2 (Zmiana modulacji) -> ŚRODEK (50.0%)
+       Przycisk 3 (HORN) -> PRAWA STRONA (56.25%)
+    */
+    #btn-1 { top: 48.6%; left: 43.9%; }   /* Start MIX / OFF */
+    #btn-2 { top: 48.6%; left: 50.0%; }   /* Zmiana modulacji */
+    #btn-3 { top: 48.6%; left: 56.25%; }  /* HORN */
+
+    /* Przycisk trybu pełnoekranowego */
+    .fullscreen-btn {
+      position: fixed;
+      top: 15px;
+      right: 15px;
+      z-index: 100;
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 6px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      backdrop-filter: blur(4px);
+      transition: background 0.2s, transform 0.1s;
+    }
+
+    .fullscreen-btn:hover {
+      background: rgba(255, 255, 255, 0.25);
+    }
+
+    .fullscreen-btn:active {
+      transform: scale(0.95);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Przycisk do przełączania pełnego ekranu -->
+  <button id="fs-toggle" class="fullscreen-btn" title="Naciśnij F lub kliknij, aby przełączyć pełny ekran">⛶ Pełny ekran</button>
+
+  <div class="pilot-container" id="pilot">
+    <button id="btn-1" class="btn" title="Przycisk 1: Start MIX / Wyłącz"></button>
+    <button id="btn-2" class="btn" title="Przycisk 2: Zmiana modulacji"></button>
+    <button id="btn-3" class="btn" title="Przycisk 3: HORN (trzymaj)"></button>
+  </div>
+
+  <script>
+    // Obsługa pełnego ekranu dla zdjęcia/pilota
+    const pilotEl = document.getElementById('pilot');
+    const fsToggleBtn = document.getElementById('fs-toggle');
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        if (pilotEl.requestFullscreen) {
+          pilotEl.requestFullscreen();
+        } else if (pilotEl.webkitRequestFullscreen) {
+          pilotEl.webkitRequestFullscreen();
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          document.webkitExitFullscreen();
+        }
+      }
+    }
+
+    fsToggleBtn.addEventListener('click', toggleFullscreen);
+
+    // Klawisz 'F' włącza/wyłącza pełny ekran
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'f' || e.key === 'F') {
+        toggleFullscreen();
+      }
+    });
+
+    // Klasa płynnego zapętlania dźwięków z konfigurowalnym progiem przeskoku
+    class SeamlessAudio {
+      constructor(filename, threshold = 0.08, intervalMs = 10) {
+        this.filename = filename;
+        this.threshold = threshold;
+        this.intervalMs = intervalMs;
+        this.a1 = new Audio(filename);
+        this.a2 = new Audio(filename);
+        this.activeAudio = this.a1;
+        this.nextAudio = this.a2;
+        this.isPlaying = false;
+        this.isMuted = false;
+        this.interval = null;
+
+        this.checkLoop = () => {
+          if (!this.isPlaying) return;
+          const curr = this.activeAudio;
+          
+          if (curr.duration && (curr.duration - curr.currentTime <= this.threshold)) {
+            const next = this.nextAudio;
+            next.currentTime = 0;
+            next.volume = this.isMuted ? 0 : 1;
+            next.play().catch(() => {});
+
+            this.activeAudio = next;
+            this.nextAudio = curr;
+          }
+        };
+      }
+
+      play() {
+        this.stop();
+        this.isPlaying = true;
+        this.isMuted = false;
+        this.activeAudio = this.a1;
+        this.nextAudio = this.a2;
+        
+        this.activeAudio.currentTime = 0;
+        this.activeAudio.volume = 1;
+        this.activeAudio.play().catch(() => {});
+
+        this.interval = setInterval(this.checkLoop, this.intervalMs);
+      }
+
+      stop() {
+        this.isPlaying = false;
+        if (this.interval) clearInterval(this.interval);
+        
+        [this.a1, this.a2].forEach(a => {
+          a.pause();
+          a.currentTime = 0;
+        });
+      }
+
+      setMute(mute) {
+        this.isMuted = mute;
+        this.a1.volume = mute ? 0 : 1;
+        this.a2.volume = mute ? 0 : 1;
+      }
+    }
+
+    // Syreny na standardowym przeskoku 0.08s
+    const sounds = {
+      mix: new SeamlessAudio('mix.wav', 0.08, 10),
+      wail: new SeamlessAudio('wail.wav', 0.08, 10),
+      hilo: new SeamlessAudio('hilo.wav', 0.08, 10),
+      yelp: new SeamlessAudio('yelp.wav', 0.08, 10),
+      horn: new SeamlessAudio('horn.wav', 0.06, 5)
+    };
+
+    const modSequence = ['wail', 'hilo', 'yelp'];
+    let currentModIndex = 0;
+    let activeSoundName = null;
+    let isActive = false;
+    let isHornPlaying = false;
+
+    const btn1 = document.getElementById('btn-1');
+    const btn2 = document.getElementById('btn-2');
+    const btn3 = document.getElementById('btn-3');
+
+    function stopAllSirens() {
+      ['mix', 'wail', 'hilo', 'yelp'].forEach(key => sounds[key].stop());
+      activeSoundName = null;
+    }
+
+    function playSiren(soundName) {
+      stopAllSirens();
+      activeSoundName = soundName;
+      sounds[soundName].play();
+    }
+
+    // PRZYCISK 1 (Po lewej): Start MIX / Stop
+    btn1.addEventListener('click', () => {
+      if (isActive) {
+        stopAllSirens();
+        isActive = false;
+        btn1.classList.remove('active');
+        btn2.classList.remove('active');
+      } else {
+        currentModIndex = 0;
+        playSiren('mix');
+        isActive = true;
+        btn1.classList.add('active');
+      }
+    });
+
+    // PRZYCISK 2 (Na środku): Zmiana tonu
+    btn2.addEventListener('click', () => {
+      if (!isActive) return;
+
+      const nextSound = modSequence[currentModIndex];
+      playSiren(nextSound);
+
+      currentModIndex = (currentModIndex + 1) % modSequence.length;
+
+      btn1.classList.remove('active');
+      btn2.classList.add('active');
+    });
+
+    // PRZYCISK 3 (Po prawej): HORN (Trzymaj)
+    function startHorn() {
+      if (isHornPlaying) return;
+      isHornPlaying = true;
+
+      if (isActive && activeSoundName) {
+        sounds[activeSoundName].setMute(true);
+      }
+
+      sounds.horn.play();
+      btn3.classList.add('active');
+    }
+
+    function stopHorn() {
+      if (!isHornPlaying) return;
+      isHornPlaying = false;
+
+      sounds.horn.stop();
+
+      if (isActive && activeSoundName) {
+        sounds[activeSoundName].setMute(false);
+      }
+      btn3.classList.remove('active');
+    }
+
+    btn3.addEventListener('mousedown', startHorn);
+    btn3.addEventListener('mouseup', stopHorn);
+    btn3.addEventListener('mouseleave', stopHorn);
+
+    btn3.addEventListener('touchstart', (e) => { e.preventDefault(); startHorn(); });
+    btn3.addEventListener('touchend', (e) => { e.preventDefault(); stopHorn(); });
+  </script>
+
+</body>
+</html>
